@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import os
+import zlib
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -15,6 +16,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 SALT_SIZE = 16
 KDF_ITERATIONS = 200_000
 MIN_PASSWORD_LENGTH = 8
+MAGIC_HEADER = b"SC1"
+FLAG_COMPRESSED = 0x01
 
 
 class SecurityError(Exception):
@@ -62,35 +65,53 @@ def _derive_key(password: str, salt: bytes) -> bytes:
     return base64.urlsafe_b64encode(kdf.derive(password_bytes))
 
 
-def encrypt_message(plaintext: str, password: str) -> bytes:
+def encrypt_message(plaintext: str, password: str, compress: bool = False) -> bytes:
     """Encrypt plaintext using a password-derived key.
 
-    Returns: salt + fernet_token
+    Returns: magic + flags + salt + fernet_token (versioned payload).
     """
 
     plaintext_bytes = _validate_plaintext(plaintext)
+    if compress:
+        plaintext_bytes = zlib.compress(plaintext_bytes)
     salt = os.urandom(SALT_SIZE)
     key = _derive_key(password, salt)
     token = Fernet(key).encrypt(plaintext_bytes)
-    return salt + token
+    flags = FLAG_COMPRESSED if compress else 0
+    return MAGIC_HEADER + bytes([flags]) + salt + token
 
 
 def decrypt_message(payload: bytes, password: str) -> str:
-    """Decrypt payload (salt + fernet_token) using the password."""
+    """Decrypt payload using the password."""
 
     if not isinstance(payload, (bytes, bytearray)):
         raise DecryptionError("Encrypted payload must be bytes.")
     if len(payload) <= SALT_SIZE:
         raise DecryptionError("Encrypted payload is too short.")
 
-    salt = payload[:SALT_SIZE]
-    token = payload[SALT_SIZE:]
+    if payload.startswith(MAGIC_HEADER):
+        if len(payload) <= len(MAGIC_HEADER) + 1 + SALT_SIZE:
+            raise DecryptionError("Encrypted payload is too short.")
+        flags = payload[len(MAGIC_HEADER)]
+        salt_start = len(MAGIC_HEADER) + 1
+        salt = payload[salt_start : salt_start + SALT_SIZE]
+        token = payload[salt_start + SALT_SIZE :]
+        compressed = bool(flags & FLAG_COMPRESSED)
+    else:
+        salt = payload[:SALT_SIZE]
+        token = payload[SALT_SIZE:]
+        compressed = False
     key = _derive_key(password, salt)
 
     try:
         plaintext_bytes = Fernet(key).decrypt(token)
     except InvalidToken as exc:
         raise DecryptionError("Wrong password or corrupted data.") from exc
+    if compressed:
+        try:
+            plaintext_bytes = zlib.decompress(plaintext_bytes)
+        except zlib.error as exc:
+            raise DecryptionError("Decompression failed for payload.") from exc
 
     try:
         return plaintext_bytes.decode("utf-8")

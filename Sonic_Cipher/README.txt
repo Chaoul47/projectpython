@@ -13,6 +13,7 @@ Features
 - Password-based encryption using PBKDF2 + Fernet (AES in CBC with HMAC).
 - Capacity checks before writing hidden data.
 - Optional waveform comparison plot for visual inspection.
+- Optional compression to fit longer messages.
 
 Requirements
 ------------
@@ -37,7 +38,8 @@ Workflow: Hide Data
 1. Open the "Hide Data" tab.
 2. Browse and select a WAV file.
 3. Enter the secret message and password.
-4. Click "ENCRYPT & HIDE" and save the new WAV file.
+4. (Optional) Enable compression to fit more text.
+5. Click "ENCRYPT & HIDE" and save the new WAV file.
 
 Workflow: Reveal Data
 ---------------------

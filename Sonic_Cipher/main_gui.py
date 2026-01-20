@@ -21,6 +21,7 @@ class SonicCipherApp(tk.Tk):
         self.hide_capacity_var = tk.StringVar(value="Capacity: -")
         self.hide_message_len_var = tk.StringVar(value="Message length: 0 chars")
         self.hide_password_var = tk.StringVar(value="")
+        self.hide_compress_var = tk.BooleanVar(value=False)
         self.hide_capacity_bytes = 0
 
         self.reveal_input_path = tk.StringVar(value="")
@@ -76,6 +77,14 @@ class SonicCipherApp(tk.Tk):
         ttk.Entry(pwd_frame, textvariable=self.hide_password_var, show="*").pack(
             fill="x", padx=8, pady=8
         )
+
+        options_frame = ttk.LabelFrame(parent, text="Options")
+        options_frame.pack(fill="x", padx=8, pady=8)
+        ttk.Checkbutton(
+            options_frame,
+            text="Compress message before encryption",
+            variable=self.hide_compress_var,
+        ).pack(anchor="w", padx=8, pady=6)
 
         ttk.Button(
             parent, text="ENCRYPT & HIDE", command=self._handle_hide
@@ -145,9 +154,10 @@ class SonicCipherApp(tk.Tk):
 
         message = self.hide_message_text.get("1.0", "end-1c")
         password = self.hide_password_var.get()
+        compress = self.hide_compress_var.get()
 
         try:
-            encrypted = security.encrypt_message(message, password)
+            encrypted = security.encrypt_message(message, password, compress=compress)
         except security.SecurityError as exc:
             messagebox.showerror("Error", str(exc))
             return
