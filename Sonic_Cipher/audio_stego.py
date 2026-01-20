@@ -5,16 +5,59 @@ Implements LSB embedding and extraction for WAV files.
 
 from __future__ import annotations
 
+import hashlib
+import random
 import wave
 from pathlib import Path
 from typing import Iterable, Tuple, Union
 
 DELIMITER = b"###END###"
 SUPPORTED_SAMPLE_WIDTHS = {1, 2, 3, 4}
+MIN_PASSWORD_LENGTH = 8
+EMBED_KDF_SALT = b"SonicCipher|Embedding"
+EMBED_KDF_ITERATIONS = 120_000
 
 
 class StegoError(Exception):
     """Base class for steganography errors."""
+
+
+def _validate_password(password: str) -> bytes:
+    if not isinstance(password, str):
+        raise StegoError("Password must be a string.")
+    if not password or not password.strip():
+        raise StegoError("Password cannot be empty.")
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise StegoError(
+            f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+        )
+    return password.encode("utf-8")
+
+
+def _derive_embedding_seed(password: str) -> int:
+    password_bytes = _validate_password(password)
+    key = hashlib.pbkdf2_hmac(
+        "sha256",
+        password_bytes,
+        EMBED_KDF_SALT,
+        EMBED_KDF_ITERATIONS,
+        dklen=32,
+    )
+    return int.from_bytes(key, byteorder="big", signed=False)
+
+
+def _iter_keyed_positions(sample_count: int, password: str) -> Iterable[int]:
+    if sample_count <= 0:
+        raise StegoError("Audio has no samples available for embedding.")
+    seed = _derive_embedding_seed(password)
+    rng = random.Random(seed)
+    swap_map: dict[int, int] = {}
+    for i in range(sample_count):
+        j = rng.randrange(i, sample_count)
+        pos_j = swap_map.get(j, j)
+        pos_i = swap_map.get(i, i)
+        swap_map[j] = pos_i
+        yield pos_j
 
 
 def _validate_wav_path(path: Union[str, Path]) -> Path:
@@ -83,9 +126,12 @@ def _write_wave(path: Path, params: wave._wave_params, frames: bytes) -> None:
 
 
 def hide_data(
-    in_path: Union[str, Path], out_path: Union[str, Path], payload: bytes
+    in_path: Union[str, Path],
+    out_path: Union[str, Path],
+    payload: bytes,
+    password: str,
 ) -> None:
-    """Hide payload bytes inside a WAV file and write the result to out_path."""
+    """Hide payload bytes inside a WAV file using keyed random embedding."""
 
     if not isinstance(payload, (bytes, bytearray)) or not payload:
         raise StegoError("Payload must be non-empty bytes.")
@@ -105,22 +151,20 @@ def hide_data(
 
     bit_iter = _bytes_to_bits(full_payload)
     samples_count = len(frame_bytes) // params.sampwidth
-    for sample_index in range(samples_count):
+    positions = _iter_keyed_positions(samples_count, password)
+    for bit in bit_iter:
         try:
-            bit = next(bit_iter)
-        except StopIteration:
-            break
+            sample_index = next(positions)
+        except StopIteration as exc:
+            raise StegoError("Not enough capacity to hide the message.") from exc
         byte_index = sample_index * params.sampwidth
         frame_bytes[byte_index] = (frame_bytes[byte_index] & 0xFE) | bit
-
-    if next(bit_iter, None) is not None:
-        raise StegoError("Not enough capacity to hide the message.")
 
     _write_wave(out_path, params, bytes(frame_bytes))
 
 
-def extract_data(path: Union[str, Path]) -> bytes:
-    """Extract payload bytes from a WAV file using the delimiter."""
+def extract_data(path: Union[str, Path], password: str) -> bytes:
+    """Extract payload bytes from a WAV file using keyed random embedding."""
 
     wav_path = _validate_wav_path(path)
     params, frame_bytes = _read_wave(wav_path)
@@ -129,7 +173,8 @@ def extract_data(path: Union[str, Path]) -> bytes:
     collected = bytearray()
     bit_buffer = []
 
-    for sample_index in range(samples_count):
+    positions = _iter_keyed_positions(samples_count, password)
+    for sample_index in positions:
         byte_index = sample_index * params.sampwidth
         bit_buffer.append(frame_bytes[byte_index] & 1)
         if len(bit_buffer) == 8:
@@ -138,7 +183,7 @@ def extract_data(path: Union[str, Path]) -> bytes:
             if collected.endswith(DELIMITER):
                 return bytes(collected[:-len(DELIMITER)])
 
-    raise StegoError("Delimiter not found. No hidden message detected.")
+    raise StegoError("Delimiter not found. Wrong password or no hidden message.")
 
 
 def plot_waveform_comparison(

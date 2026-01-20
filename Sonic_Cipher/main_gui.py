@@ -176,7 +176,7 @@ class SonicCipherApp(tk.Tk):
             return
 
         try:
-            audio_stego.hide_data(wav_path, out_path, encrypted)
+            audio_stego.hide_data(wav_path, out_path, encrypted, password)
         except Exception as exc:
             messagebox.showerror("Error", str(exc))
             return
@@ -192,7 +192,7 @@ class SonicCipherApp(tk.Tk):
         password = self.reveal_password_var.get()
 
         try:
-            payload = audio_stego.extract_data(wav_path)
+            payload = audio_stego.extract_data(wav_path, password)
         except Exception as exc:
             messagebox.showerror("Error", str(exc))
             return
