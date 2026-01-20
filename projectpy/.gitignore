@@ -1,0 +1,26 @@
+# Ignore Windows folders/files
+desktop.ini
+Thumbs.db
+
+# Ignore common personal folders if they appear
+My Music/
+My Pictures/
+My Videos/
+OneNote Notebooks/
+Virtual Machines/
+My Games/
+Rockstar Games/
+MiniRoyale/
+Avalanche Studios/
+
+# Ignore random screenshots & reports
+*.png
+*.jpg
+*.html
+*.txt
+*.pdf
+*.docx
+
+# Ignore python venv
+.venv/
+__pycache__/
