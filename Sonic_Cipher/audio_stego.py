@@ -9,13 +9,14 @@ import hashlib
 import random
 import wave
 from pathlib import Path
-from typing import Iterable, Tuple, Union
+from typing import Iterable, List, Tuple, Union
 
 DELIMITER = b"###END###"
 SUPPORTED_SAMPLE_WIDTHS = {1, 2, 3, 4}
 MIN_PASSWORD_LENGTH = 8
 EMBED_KDF_SALT = b"SonicCipher|Embedding"
 EMBED_KDF_ITERATIONS = 120_000
+HIGH_ENERGY_PERCENTILE = 0.6
 
 
 class StegoError(Exception):
@@ -46,18 +47,50 @@ def _derive_embedding_seed(password: str) -> int:
     return int.from_bytes(key, byteorder="big", signed=False)
 
 
-def _iter_keyed_positions(sample_count: int, password: str) -> Iterable[int]:
-    if sample_count <= 0:
-        raise StegoError("Audio has no samples available for embedding.")
+def _iter_keyed_positions(positions: List[int], password: str) -> Iterable[int]:
+    if not positions:
+        raise StegoError("No eligible samples for embedding.")
     seed = _derive_embedding_seed(password)
     rng = random.Random(seed)
-    swap_map: dict[int, int] = {}
-    for i in range(sample_count):
-        j = rng.randrange(i, sample_count)
-        pos_j = swap_map.get(j, j)
-        pos_i = swap_map.get(i, i)
-        swap_map[j] = pos_i
-        yield pos_j
+    shuffled = positions[:]
+    rng.shuffle(shuffled)
+    for pos in shuffled:
+        yield pos
+
+
+def _read_sample_values(
+    frame_bytes: bytearray, sampwidth: int, mask_lsb: bool = False
+) -> List[int]:
+    samples: List[int] = []
+    for i in range(0, len(frame_bytes), sampwidth):
+        chunk = frame_bytes[i : i + sampwidth]
+        if mask_lsb:
+            chunk = bytearray(chunk)
+            chunk[0] &= 0xFE
+        if sampwidth == 1:
+            val = chunk[0] - 128
+        else:
+            val = int.from_bytes(chunk, byteorder="little", signed=True)
+        samples.append(val)
+    return samples
+
+
+def _select_high_energy_positions(
+    frame_bytes: bytearray, sampwidth: int
+) -> List[int]:
+    samples = _read_sample_values(frame_bytes, sampwidth, mask_lsb=True)
+    if not samples:
+        raise StegoError("Audio has no samples available for embedding.")
+    energies = [abs(val) for val in samples]
+    sorted_energies = sorted(energies)
+    cutoff_index = int(len(sorted_energies) * HIGH_ENERGY_PERCENTILE)
+    if cutoff_index >= len(sorted_energies):
+        cutoff_index = len(sorted_energies) - 1
+    threshold = sorted_energies[cutoff_index]
+    positions = [i for i, energy in enumerate(energies) if energy >= threshold]
+    if not positions:
+        raise StegoError("No high-energy samples available for embedding.")
+    return positions
 
 
 def _validate_wav_path(path: Union[str, Path]) -> Path:
@@ -98,10 +131,9 @@ def calculate_capacity(path: Union[str, Path]) -> int:
     """Return max payload bytes available for this WAV (excluding delimiter)."""
 
     wav_path = _validate_wav_path(path)
-    with wave.open(str(wav_path), "rb") as wf:
-        n_frames = wf.getnframes()
-        n_channels = wf.getnchannels()
-    max_payload = _max_payload_bytes(n_frames, n_channels)
+    params, frame_bytes = _read_wave(wav_path)
+    positions = _select_high_energy_positions(frame_bytes, params.sampwidth)
+    max_payload = len(positions) // 8
     available = max_payload - len(DELIMITER)
     return max(0, available)
 
@@ -131,7 +163,7 @@ def hide_data(
     payload: bytes,
     password: str,
 ) -> None:
-    """Hide payload bytes inside a WAV file using keyed random embedding."""
+    """Hide payload bytes inside a WAV file using adaptive keyed embedding."""
 
     if not isinstance(payload, (bytes, bytearray)) or not payload:
         raise StegoError("Payload must be non-empty bytes.")
@@ -150,13 +182,14 @@ def hide_data(
         )
 
     bit_iter = _bytes_to_bits(full_payload)
-    samples_count = len(frame_bytes) // params.sampwidth
-    positions = _iter_keyed_positions(samples_count, password)
+    positions = _select_high_energy_positions(frame_bytes, params.sampwidth)
+    if required_bits > len(positions):
+        raise StegoError(
+            "Message too large for high-energy embedding. Use a larger WAV or shorter message."
+        )
+    keyed_positions = _iter_keyed_positions(positions, password)
     for bit in bit_iter:
-        try:
-            sample_index = next(positions)
-        except StopIteration as exc:
-            raise StegoError("Not enough capacity to hide the message.") from exc
+        sample_index = next(keyed_positions)
         byte_index = sample_index * params.sampwidth
         frame_bytes[byte_index] = (frame_bytes[byte_index] & 0xFE) | bit
 
@@ -164,17 +197,17 @@ def hide_data(
 
 
 def extract_data(path: Union[str, Path], password: str) -> bytes:
-    """Extract payload bytes from a WAV file using keyed random embedding."""
+    """Extract payload bytes from a WAV file using adaptive keyed embedding."""
 
     wav_path = _validate_wav_path(path)
     params, frame_bytes = _read_wave(wav_path)
 
-    samples_count = len(frame_bytes) // params.sampwidth
     collected = bytearray()
     bit_buffer = []
 
-    positions = _iter_keyed_positions(samples_count, password)
-    for sample_index in positions:
+    positions = _select_high_energy_positions(frame_bytes, params.sampwidth)
+    keyed_positions = _iter_keyed_positions(positions, password)
+    for sample_index in keyed_positions:
         byte_index = sample_index * params.sampwidth
         bit_buffer.append(frame_bytes[byte_index] & 1)
         if len(bit_buffer) == 8:
@@ -206,20 +239,7 @@ def plot_waveform_comparison(
 
     def read_samples(path: Path) -> Tuple[int, list[int]]:
         params, frame_bytes = _read_wave(path)
-        step = params.sampwidth
-        samples = []
-        for i in range(0, len(frame_bytes), step):
-            chunk = frame_bytes[i : i + step]
-            if step == 1:
-                # 8-bit PCM is unsigned.
-                val = chunk[0] - 128
-            elif step == 2:
-                val = int.from_bytes(chunk, byteorder="little", signed=True)
-            elif step == 3:
-                val = int.from_bytes(chunk, byteorder="little", signed=True)
-            else:
-                val = int.from_bytes(chunk, byteorder="little", signed=True)
-            samples.append(val)
+        samples = _read_sample_values(frame_bytes, params.sampwidth)
         if len(samples) > max_points:
             stride = max(1, len(samples) // max_points)
             samples = samples[::stride]
