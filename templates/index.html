@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Sonic Cipher Web</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Audio Steganography + Encryption</p>
+          <h1>Sonic Cipher</h1>
+          <p class="subtitle">Hide encrypted messages inside WAV files and extract them with a password.</p>
+        </div>
+      </header>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <section class="alerts">
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          </section>
+        {% endif %}
+      {% endwith %}
+
+      <section class="grid">
+        <form class="card" method="post" action="{{ url_for('hide') }}" enctype="multipart/form-data">
+          <h2>Hide Data</h2>
+          <label>
+            Input WAV
+            <input type="file" name="audio" accept=".wav" required>
+          </label>
+          <label>
+            Secret Message
+            <textarea name="message" rows="7" placeholder="Type your secret message..." required></textarea>
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" placeholder="At least 8 characters" required>
+          </label>
+          <button type="submit">Encrypt &amp; Hide</button>
+          <p class="hint">You will download a new WAV file with the hidden payload.</p>
+        </form>
+
+        <form class="card" method="post" action="{{ url_for('reveal') }}" enctype="multipart/form-data">
+          <h2>Reveal Data</h2>
+          <label>
+            Secret WAV
+            <input type="file" name="audio" accept=".wav" required>
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" placeholder="Same password used to hide" required>
+          </label>
+          <button type="submit">Decrypt &amp; Extract</button>
+
+          <label>
+            Decrypted Message
+            <textarea rows="7" readonly>{{ decrypted_message or "" }}</textarea>
+          </label>
+          <p class="hint">If the password is wrong, extraction will fail.</p>
+        </form>
+      </section>
+
+      <footer class="footer">
+        <p>Only uncompressed PCM .wav files are supported.</p>
+      </footer>
+    </main>
+  </body>
+</html>
