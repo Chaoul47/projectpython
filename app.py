@@ -18,7 +18,6 @@ from werkzeug.utils import secure_filename
 
 from Sonic_Cipher import audio_stego, security
 
-BASE_DIR = Path(__file__).resolve().parent
 ALLOWED_EXTENSIONS = {".wav"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
@@ -31,6 +30,24 @@ def _make_temp_path(suffix: str) -> str:
     fd, path = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
     return path
+
+
+def _safe_remove(path: str | None) -> None:
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _cleanup_paths(*paths: str | None) -> None:
+    for path in paths:
+        _safe_remove(path)
+
+
+def _flash_error(message: object):
+    flash(str(message), "error")
+    return redirect(url_for("index"))
 
 
 def _save_upload(file_storage) -> tuple[str, str]:
@@ -58,14 +75,10 @@ def hide() -> "flask.wrappers.Response":
     password = request.form.get("password", "")
     upload = request.files.get("audio")
 
-    try:
-        input_path, original_name = _save_upload(upload)
-    except Exception as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("index"))
-
+    input_path = None
     output_path = None
     try:
+        input_path, original_name = _save_upload(upload)
         encrypted = security.encrypt_message(message, password)
         capacity = audio_stego.calculate_capacity(input_path)
         if len(encrypted) > capacity:
@@ -79,12 +92,7 @@ def hide() -> "flask.wrappers.Response":
 
         @after_this_request
         def _cleanup(response):
-            for path in (input_path, output_path):
-                if path and os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
+            _cleanup_paths(input_path, output_path)
             return response
 
         return send_file(
@@ -94,12 +102,8 @@ def hide() -> "flask.wrappers.Response":
             mimetype="audio/wav",
         )
     except Exception as exc:
-        if os.path.exists(input_path):
-            os.remove(input_path)
-        if output_path and os.path.exists(output_path):
-            os.remove(output_path)
-        flash(str(exc), "error")
-        return redirect(url_for("index"))
+        _cleanup_paths(input_path, output_path)
+        return _flash_error(exc)
 
 
 @app.route("/reveal", methods=["POST"])
@@ -107,22 +111,16 @@ def reveal() -> str:
     password = request.form.get("password", "")
     upload = request.files.get("audio")
 
+    input_path = None
     try:
         input_path, _ = _save_upload(upload)
-    except Exception as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("index"))
-
-    try:
         payload = audio_stego.extract_data(input_path, password)
         message = security.decrypt_message(payload, password)
         return render_template("index.html", decrypted_message=message)
     except Exception as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("index"))
+        return _flash_error(exc)
     finally:
-        if os.path.exists(input_path):
-            os.remove(input_path)
+        _cleanup_paths(input_path)
 
 
 if __name__ == "__main__":

@@ -65,6 +65,22 @@ def _derive_key(password: str, salt: bytes) -> bytes:
     return base64.urlsafe_b64encode(kdf.derive(password_bytes))
 
 
+def _split_payload(payload: bytes) -> tuple[bytes, bytes, bool]:
+    if len(payload) <= SALT_SIZE:
+        raise DecryptionError("Encrypted payload is too short.")
+
+    if payload.startswith(MAGIC_HEADER):
+        header_len = len(MAGIC_HEADER) + 1
+        if len(payload) <= header_len + SALT_SIZE:
+            raise DecryptionError("Encrypted payload is too short.")
+        flags = payload[len(MAGIC_HEADER)]
+        salt = payload[header_len : header_len + SALT_SIZE]
+        token = payload[header_len + SALT_SIZE :]
+        return salt, token, bool(flags & FLAG_COMPRESSED)
+
+    return payload[:SALT_SIZE], payload[SALT_SIZE:], False
+
+
 def encrypt_message(plaintext: str, password: str, compress: bool = False) -> bytes:
     """Encrypt plaintext using a password-derived key.
 
@@ -86,21 +102,8 @@ def decrypt_message(payload: bytes, password: str) -> str:
 
     if not isinstance(payload, (bytes, bytearray)):
         raise DecryptionError("Encrypted payload must be bytes.")
-    if len(payload) <= SALT_SIZE:
-        raise DecryptionError("Encrypted payload is too short.")
 
-    if payload.startswith(MAGIC_HEADER):
-        if len(payload) <= len(MAGIC_HEADER) + 1 + SALT_SIZE:
-            raise DecryptionError("Encrypted payload is too short.")
-        flags = payload[len(MAGIC_HEADER)]
-        salt_start = len(MAGIC_HEADER) + 1
-        salt = payload[salt_start : salt_start + SALT_SIZE]
-        token = payload[salt_start + SALT_SIZE :]
-        compressed = bool(flags & FLAG_COMPRESSED)
-    else:
-        salt = payload[:SALT_SIZE]
-        token = payload[SALT_SIZE:]
-        compressed = False
+    salt, token, compressed = _split_payload(payload)
     key = _derive_key(password, salt)
 
     try:

@@ -47,6 +47,18 @@ class SonicCipherApp(tk.Tk):
             tools_frame, text="Compare Waveforms", command=self._compare_waveforms
         ).pack(side="right")
 
+    def _show_error(self, message: str) -> None:
+        messagebox.showerror("Error", message)
+
+    def _show_info(self, message: str) -> None:
+        messagebox.showinfo("Success", message)
+
+    def _pick_wav(self, title: str) -> str:
+        return filedialog.askopenfilename(
+            title=title,
+            filetypes=[("WAV files", "*.wav")],
+        )
+
     def _build_hide_tab(self, parent: ttk.Frame) -> None:
         file_frame = ttk.LabelFrame(parent, text="Input WAV")
         file_frame.pack(fill="x", padx=8, pady=8)
@@ -117,10 +129,7 @@ class SonicCipherApp(tk.Tk):
         self.reveal_message_text.configure(state="disabled")
 
     def _select_hide_input(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Select WAV File",
-            filetypes=[("WAV files", "*.wav")],
-        )
+        path = self._pick_wav("Select WAV File")
         if not path:
             return
 
@@ -129,15 +138,12 @@ class SonicCipherApp(tk.Tk):
             self.hide_capacity_bytes = audio_stego.calculate_capacity(path)
             self.hide_capacity_var.set(f"Capacity: {self.hide_capacity_bytes} bytes")
         except Exception as exc:
-            messagebox.showerror("Error", str(exc))
+            self._show_error(str(exc))
             self.hide_capacity_bytes = 0
             self.hide_capacity_var.set("Capacity: -")
 
     def _select_reveal_input(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Select WAV File",
-            filetypes=[("WAV files", "*.wav")],
-        )
+        path = self._pick_wav("Select WAV File")
         if not path:
             return
         self.reveal_input_path.set(path)
@@ -149,7 +155,7 @@ class SonicCipherApp(tk.Tk):
     def _handle_hide(self) -> None:
         wav_path = self.hide_input_path.get()
         if not wav_path:
-            messagebox.showerror("Error", "Select a WAV file first.")
+            self._show_error("Select a WAV file first.")
             return
 
         message = self.hide_message_text.get("1.0", "end-1c")
@@ -158,21 +164,13 @@ class SonicCipherApp(tk.Tk):
 
         try:
             encrypted = security.encrypt_message(message, password, compress=compress)
-        except security.SecurityError as exc:
-            messagebox.showerror("Error", str(exc))
-            return
-
-        try:
             capacity = audio_stego.calculate_capacity(wav_path)
+            if len(encrypted) > capacity:
+                raise ValueError(
+                    f"Encrypted payload is too large. Capacity: {capacity} bytes."
+                )
         except Exception as exc:
-            messagebox.showerror("Error", str(exc))
-            return
-
-        if len(encrypted) > capacity:
-            messagebox.showerror(
-                "Error",
-                f"Encrypted payload is too large. Capacity: {capacity} bytes.",
-            )
+            self._show_error(str(exc))
             return
 
         default_name = Path(wav_path).with_suffix("").name + "_secret.wav"
@@ -188,58 +186,44 @@ class SonicCipherApp(tk.Tk):
         try:
             audio_stego.hide_data(wav_path, out_path, encrypted, password)
         except Exception as exc:
-            messagebox.showerror("Error", str(exc))
+            self._show_error(str(exc))
             return
 
-        messagebox.showinfo("Success", f"File saved to:\n{out_path}")
+        self._show_info(f"File saved to:\n{out_path}")
 
     def _handle_reveal(self) -> None:
         wav_path = self.reveal_input_path.get()
         if not wav_path:
-            messagebox.showerror("Error", "Select a WAV file first.")
+            self._show_error("Select a WAV file first.")
             return
 
         password = self.reveal_password_var.get()
 
         try:
             payload = audio_stego.extract_data(wav_path, password)
-        except Exception as exc:
-            messagebox.showerror("Error", str(exc))
-            return
-
-        try:
             message = security.decrypt_message(payload, password)
-        except security.DecryptionError as exc:
-            messagebox.showerror("Error", str(exc))
-            return
-        except security.SecurityError as exc:
-            messagebox.showerror("Error", str(exc))
+        except Exception as exc:
+            self._show_error(str(exc))
             return
 
         self.reveal_message_text.configure(state="normal")
         self.reveal_message_text.delete("1.0", "end")
         self.reveal_message_text.insert("1.0", message)
         self.reveal_message_text.configure(state="disabled")
-        messagebox.showinfo("Success", "Message decrypted successfully.")
+        self._show_info("Message decrypted successfully.")
 
     def _compare_waveforms(self) -> None:
-        orig_path = filedialog.askopenfilename(
-            title="Select Original WAV",
-            filetypes=[("WAV files", "*.wav")],
-        )
+        orig_path = self._pick_wav("Select Original WAV")
         if not orig_path:
             return
-        steg_path = filedialog.askopenfilename(
-            title="Select Stego WAV",
-            filetypes=[("WAV files", "*.wav")],
-        )
+        steg_path = self._pick_wav("Select Stego WAV")
         if not steg_path:
             return
 
         try:
             audio_stego.plot_waveform_comparison(orig_path, steg_path)
         except Exception as exc:
-            messagebox.showerror("Error", str(exc))
+            self._show_error(str(exc))
 
 
 def main() -> None:

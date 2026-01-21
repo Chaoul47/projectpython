@@ -139,11 +139,6 @@ def _bits_to_byte(bits: Iterable[int]) -> int:
     return value
 
 
-def _max_payload_bytes(n_frames: int, n_channels: int) -> int:
-    sample_count = n_frames * n_channels
-    return sample_count // 8
-
-
 def calculate_capacity(path: Union[str, Path]) -> int:
     """Return max payload bytes available for this WAV (excluding delimiter)."""
 
