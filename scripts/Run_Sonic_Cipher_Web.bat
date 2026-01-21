@@ -1,9 +1,10 @@
 @echo off
 setlocal
 
-set "ROOT=%~dp0"
-set "PY=%ROOT%.venv\Scripts\python.exe"
-set "APP=%ROOT%app.py"
+set "ROOT=%~dp0.."
+for %%I in ("%ROOT%") do set "ROOT=%%~fI"
+set "PY=%ROOT%\.venv\Scripts\python.exe"
+set "APP=%ROOT%\app.py"
 
 if exist "%PY%" (
   "%PY%" "%APP%"

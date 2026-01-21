@@ -7,3 +7,5 @@ __pycache__/
 *.log
 *.tmp
 *.wav
+.env
+*.lnk

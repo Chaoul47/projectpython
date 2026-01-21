@@ -1,5 +1,6 @@
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$target = Join-Path $root "Run_Sonic_Cipher.bat"
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent $scriptDir
+$target = Join-Path $scriptDir "Run_Sonic_Cipher.bat"
 $desktop = [Environment]::GetFolderPath("Desktop")
 $shortcutPath = Join-Path $desktop "Sonic Cipher.lnk"
 

@@ -1,9 +1,10 @@
 @echo off
 setlocal
 
-set "ROOT=%~dp0"
-set "PY=%ROOT%.venv\Scripts\python.exe"
-set "APP=%ROOT%Sonic_Cipher\main_gui.py"
+set "ROOT=%~dp0.."
+for %%I in ("%ROOT%") do set "ROOT=%%~fI"
+set "PY=%ROOT%\.venv\Scripts\python.exe"
+set "APP=%ROOT%\Sonic_Cipher\main_gui.py"
 
 if exist "%PY%" (
   "%PY%" "%APP%"
@@ -17,5 +18,5 @@ goto :eof
 
 :error
 echo Failed to start Sonic Cipher. Ensure Python and dependencies are installed.
-echo Tip: .\.venv\Scripts\python -m pip install cryptography matplotlib
+echo Tip: .\.venv\Scripts\python -m pip install -r requirements.txt
 pause
