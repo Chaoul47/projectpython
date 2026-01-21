@@ -58,30 +58,47 @@ def _iter_keyed_positions(positions: List[int], password: str) -> Iterable[int]:
         yield pos
 
 
+def _decode_sample_value(
+    chunk: memoryview, sampwidth: int, mask_lsb: bool
+) -> int:
+    if sampwidth == 1:
+        val = chunk[0] - 128
+    else:
+        val = int.from_bytes(chunk, byteorder="little", signed=True)
+    if mask_lsb:
+        val &= ~1
+    return val
+
+
 def _read_sample_values(
     frame_bytes: bytearray, sampwidth: int, mask_lsb: bool = False
 ) -> List[int]:
     samples: List[int] = []
-    for i in range(0, len(frame_bytes), sampwidth):
-        chunk = frame_bytes[i : i + sampwidth]
-        if mask_lsb:
-            chunk = bytearray(chunk)
-            chunk[0] &= 0xFE
-        if sampwidth == 1:
-            val = chunk[0] - 128
-        else:
-            val = int.from_bytes(chunk, byteorder="little", signed=True)
-        samples.append(val)
+    view = memoryview(frame_bytes)
+    for i in range(0, len(view), sampwidth):
+        chunk = view[i : i + sampwidth]
+        samples.append(_decode_sample_value(chunk, sampwidth, mask_lsb))
     return samples
+
+
+def _read_sample_energies(
+    frame_bytes: bytearray, sampwidth: int, mask_lsb: bool = True
+) -> List[int]:
+    energies: List[int] = []
+    view = memoryview(frame_bytes)
+    for i in range(0, len(view), sampwidth):
+        chunk = view[i : i + sampwidth]
+        val = _decode_sample_value(chunk, sampwidth, mask_lsb)
+        energies.append(abs(val))
+    return energies
 
 
 def _select_high_energy_positions(
     frame_bytes: bytearray, sampwidth: int
 ) -> List[int]:
-    samples = _read_sample_values(frame_bytes, sampwidth, mask_lsb=True)
-    if not samples:
+    energies = _read_sample_energies(frame_bytes, sampwidth, mask_lsb=True)
+    if not energies:
         raise StegoError("Audio has no samples available for embedding.")
-    energies = [abs(val) for val in samples]
     sorted_energies = sorted(energies)
     cutoff_index = int(len(sorted_energies) * HIGH_ENERGY_PERCENTILE)
     if cutoff_index >= len(sorted_energies):
